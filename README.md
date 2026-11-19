@@ -1,11 +1,17 @@
 # Raio — navegador ultra leve para Android
 
+## Baixar o aplicativo
+
+**[⬇ Baixar Raio.apk para Android](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk)**
+
+[Ver versões e arquivos para download](https://github.com/ezeq-ol/raio/releases). Android 5.0 ou superior.
+
 Nova base do repositório SuperLite: projeto Raio criado pelo Claude, em Kotlin com WebView do sistema, sem bibliotecas externas de runtime. O código anterior permanece no histórico Git (commit `d3dd2f3`).
 
 APK de referência: aproximadamente **58 KB**, Android 5.0 ou mais novo. O tamanho não inclui o motor WebView do sistema nem representa o consumo de memória durante o uso.
 
 ## Instalar no celular
-1. Compile e copie `dist/Raio.apk` para o celular.
+1. [Baixe Raio.apk](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk) pelo celular.
 2. Abra o arquivo e permita "instalar apps desconhecidos" quando o Android pedir.
 3. Toque no ícone do raio chamado **Raio**.
 
