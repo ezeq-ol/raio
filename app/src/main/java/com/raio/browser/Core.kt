@@ -48,6 +48,11 @@ object Prefs {
     var home: String get() = s("home", ""); set(v) = put("home", v)
     var restoreTabs: Boolean get() = b("restoreTabs", true); set(v) = put("restoreTabs", v)
     var adblock: Boolean get() = b("adblock", true); set(v) = put("adblock", v)
+    var aggressive: Boolean get() = b("aggressive", true); set(v) = put("aggressive", v)
+
+    fun shieldEnabled(url: String): Boolean = adblock && !b("shieldOff:" + AdBlock.host(url), false)
+    fun setShieldException(url: String, disabled: Boolean) = put("shieldOff:" + AdBlock.host(url), disabled)
+
     var blockImages: Boolean get() = b("blockImages", false); set(v) = put("blockImages", v)
     var js: Boolean get() = b("js", true); set(v) = put("js", v)
     var desktop: Boolean get() = b("desktop", false); set(v) = put("desktop", v)
@@ -136,33 +141,5 @@ fun Activity.styleBars(color: Int, darkBar: Boolean) {
             f = if (darkBar) f and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv() else f or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
         window.decorView.systemUiVisibility = f
-    }
-}
-
-/** Bloqueio simples de anuncios e rastreadores por dominio (rapido: busca em HashSet). */
-object AdBlock {
-    private val hosts = hashSetOf(
-        "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com",
-        "googletagservices.com", "adservice.google.com", "adsystem.com", "amazon-adsystem.com",
-        "adnxs.com", "adsrvr.org", "taboola.com", "outbrain.com", "criteo.com", "criteo.net",
-        "rubiconproject.com", "pubmatic.com", "openx.net", "casalemedia.com", "scorecardresearch.com",
-        "quantserve.com", "moatads.com", "adform.net", "smartadserver.com", "advertising.com",
-        "adcolony.com", "applovin.com", "unityads.unity3d.com", "mopub.com", "inmobi.com",
-        "chartboost.com", "vungle.com", "ironsrc.com", "hotjar.com", "mixpanel.com", "segment.io",
-        "popads.net", "propellerads.com", "exoclick.com", "juicyads.com", "trafficjunky.com",
-        "revcontent.com", "mgid.com", "zedo.com", "yieldmo.com", "teads.tv", "33across.com",
-        "bidswitch.net", "sharethrough.com", "media.net", "bat.bing.com", "clarity.ms",
-        "ads.yahoo.com", "adsafeprotected.com", "doubleverify.com", "krxd.net", "bluekai.com",
-        "demdex.net", "everesttech.net", "adtech.com", "adcash.com", "hilltopads.net", "pop.ads"
-    )
-
-    fun blocked(host: String?): Boolean {
-        var h = host ?: return false
-        while (true) {
-            if (hosts.contains(h)) return true
-            val i = h.indexOf('.')
-            if (i < 0) return false
-            h = h.substring(i + 1)
-        }
     }
 }

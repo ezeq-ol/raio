@@ -25,6 +25,9 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -83,6 +86,11 @@ class MainActivity : Activity() {
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
     private var fileCb: ValueCallback<Array<Uri>>? = null
+    private var previousSystemUi = 0
+    private var previousCutoutMode = 0
+    private var previousWindowFlags = 0
+    @Volatile private var pageUrl = ""
+    private var appliedShield = ""
     private var pendingDl: Array<String>? = null
 
     // ---------------------------------------------------------------- ciclo de vida
@@ -124,7 +132,10 @@ class MainActivity : Activity() {
             return
         }
         applyWebSettings()
-        applyBars()
+        if (customView == null) applyBars() else applyImmersive()
+        val shield = shieldState()
+        if (appliedShield.isNotEmpty() && appliedShield != shield) web.reload()
+        appliedShield = shield
         web.onResume()
     }
 
@@ -142,6 +153,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (isFinishing && (Prefs.incognito || Prefs.clearExit)) clearBrowsingData()
+        if (customView != null) hideCustom()
         content.removeView(web)
         web.destroy()
         super.onDestroy()
@@ -303,7 +315,6 @@ class MainActivity : Activity() {
         web = WebView(this)
         web.setBackgroundColor(pal.bg)
         content.addView(web, 0, FrameLayout.LayoutParams(MATCH, MATCH))
-        content.addView(full, FrameLayout.LayoutParams(MATCH, MATCH))
         mobileUA = web.settings.userAgentString.replace("; wv", "").replace("Version/4.0 ", "")
         applyWebSettings()
 
@@ -312,18 +323,22 @@ class MainActivity : Activity() {
                 val sch = r.url.scheme ?: ""
                 if (sch == "http" || sch == "https" || sch == "about" || sch == "data" || sch == "blob" || sch == "javascript") return false
                 if (sch == "file") return true
+                if (Prefs.blockPopups && (!r.isForMainFrame || !r.hasGesture())) return true
                 openExternal(r.url.toString())
                 return true
             }
 
             override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? {
-                if (Prefs.adblock && AdBlock.blocked(r.url.host)) {
+                if (Prefs.shieldEnabled(pageUrl) && !r.isForMainFrame &&
+                    AdBlock.shouldBlock(r.url.toString(), pageUrl, Prefs.aggressive)) {
                     return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
                 }
                 return null
             }
 
             override fun onPageStarted(v: WebView, url: String?, f: Bitmap?) {
+                pageUrl = url ?: ""
+                appliedShield = shieldState()
                 loading = true
                 btnReload.let { setReloadKind(true) }
                 syncUrl(url)
@@ -339,11 +354,14 @@ class MainActivity : Activity() {
                     t.title = v.title ?: u
                     addHistory(t.title, u)
                 }
+                injectShield()
                 updateNav()
             }
 
             override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
                 syncUrl(url)
+                pageUrl = url ?: pageUrl
+                injectShield()
                 updateNav()
             }
 
@@ -380,7 +398,12 @@ class MainActivity : Activity() {
                 }
                 customView = view
                 customCb = cb
-                full.addView(view, FrameLayout.LayoutParams(MATCH, MATCH))
+                hideKeyboard()
+                previousSystemUi = window.decorView.systemUiVisibility
+                previousWindowFlags = window.attributes.flags
+                if (Build.VERSION.SDK_INT >= 28) previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
+                (window.decorView as ViewGroup).addView(full, ViewGroup.LayoutParams(MATCH, MATCH))
+                full.addView(view, FrameLayout.LayoutParams(MATCH, MATCH, Gravity.CENTER))
                 full.visibility = View.VISIBLE
                 setFullscreen(true)
             }
@@ -446,7 +469,8 @@ class MainActivity : Activity() {
         s.setGeolocationEnabled(false)
         s.mediaPlaybackRequiresUserGesture = true
         s.javaScriptCanOpenWindowsAutomatically = !Prefs.blockPopups
-        s.setSupportMultipleWindows(false)
+        // Unhandled popup windows are rejected by WebChromeClient.
+        s.setSupportMultipleWindows(Prefs.blockPopups)
         s.blockNetworkImage = Prefs.blockImages
         s.textZoom = Prefs.textSize
         s.setSupportZoom(true)
@@ -520,6 +544,8 @@ class MainActivity : Activity() {
 
     private fun load(u: String) {
         tabs[cur].url = u
+        pageUrl = u
+        appliedShield = shieldState()
         closeFind()
         if (u == HOME) {
             web.loadDataWithBaseURL(HOME, StartPage.html(if (Prefs.incognito) Pal(true) else pal), "text/html", "utf-8", HOME)
@@ -656,6 +682,15 @@ class MainActivity : Activity() {
         val isFav = Prefs.list("fav").any { it.url == url }
         val items = listOf<Pair<String, () -> Unit>>(
             "Nova aba" to { newTab() },
+            (if (Prefs.shieldEnabled(pageUrl)) "Desativar proteção neste site" else "Ativar proteção neste site") to {
+                if (AdBlock.host(pageUrl).isNotEmpty()) {
+                    val wasEnabled = Prefs.shieldEnabled(pageUrl)
+                    if (!Prefs.adblock) Prefs.adblock = true
+                    Prefs.setShieldException(pageUrl, wasEnabled)
+                    appliedShield = shieldState()
+                    web.reload()
+                } else toast("Abra um site para alterar a proteção")
+            },
             (if (isFav) "Remover dos favoritos" else "Adicionar aos favoritos") to { toggleFav() },
             "Favoritos" to { openLibrary("fav") },
             "Histórico" to { openLibrary("hist") },
@@ -805,26 +840,76 @@ class MainActivity : Activity() {
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(root.windowToken, 0)
     }
 
+    private fun shieldState() = "${Prefs.shieldEnabled(pageUrl)}:${Prefs.aggressive}"
+
+    private fun injectShield() {
+        if (Prefs.js && Prefs.aggressive && Prefs.shieldEnabled(pageUrl)) {
+            web.evaluateJavascript(ShieldScript.source, null)
+        }
+    }
+
+    private fun applyImmersive() {
+        window.statusBarColor = Color.BLACK
+        window.navigationBarColor = Color.BLACK
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let {
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                it.hide(WindowInsets.Type.systemBars())
+            }
+        }
+    }
+
     private fun setFullscreen(on: Boolean) {
-        val v = if (on) View.GONE else View.VISIBLE
-        topBar.visibility = v
-        bottomBar.visibility = v
-        progress.visibility = View.GONE
-        window.decorView.systemUiVisibility = if (on) {
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        } else View.SYSTEM_UI_FLAG_VISIBLE
-        if (!on) applyBars()
+        if (on) {
+            root.visibility = View.GONE
+            applyImmersive()
+        } else {
+            window.setFlags(previousWindowFlags, WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (Build.VERSION.SDK_INT >= 28) {
+                window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = previousCutoutMode }
+            }
+            if (Build.VERSION.SDK_INT >= 30) {
+                window.setDecorFitsSystemWindows(true)
+                window.insetsController?.show(WindowInsets.Type.systemBars())
+            }
+            window.decorView.systemUiVisibility = previousSystemUi
+            root.visibility = View.VISIBLE
+            root.requestApplyInsets()
+            applyBars()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && customView != null) applyImmersive()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (customView != null) applyImmersive()
     }
 
     private fun hideCustom() {
         val v = customView ?: return
-        full.removeView(v)
-        full.visibility = View.GONE
         customView = null
-        customCb?.onCustomViewHidden()
+        full.removeView(v)
+        (full.parent as? ViewGroup)?.removeView(full)
+        full.visibility = View.GONE
+        val callback = customCb
         customCb = null
         setFullscreen(false)
+        callback?.onCustomViewHidden()
     }
 
     override fun onBackPressed() {

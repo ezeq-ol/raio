@@ -11,8 +11,8 @@ android {
         applicationId = "com.raio.browser"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
@@ -40,3 +40,6 @@ android {
 }
 
 // Zero dependencias externas: APK minusculo e abertura rapida.
+
+// Apenas para testes JVM; n�o aumenta o APK.
+dependencies { testImplementation("junit:junit:4.13.2") }

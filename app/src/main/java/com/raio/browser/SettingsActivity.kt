@@ -87,6 +87,7 @@ class SettingsActivity : Activity() {
 
         header("Velocidade e dados")
         toggle("Bloquear anúncios e rastreadores", "Páginas mais leves e rápidas", Prefs.adblock) { Prefs.adblock = it }
+        toggle("Proteção agressiva", "Filtra URLs de anúncios, rastreadores e espaços de publicidade. Pode afetar alguns sites.", Prefs.aggressive) { Prefs.aggressive = it }
         toggle("Economia de dados (sem imagens)", "Não carrega imagens das páginas", Prefs.blockImages) { Prefs.blockImages = it }
         toggle("JavaScript", "Desligar deixa tudo mais leve, mas alguns sites quebram", Prefs.js) { Prefs.js = it }
         toggle("Versão para computador", "Pede a versão desktop dos sites", Prefs.desktop) { Prefs.desktop = it }
@@ -127,7 +128,7 @@ class SettingsActivity : Activity() {
         }
 
         header("Sobre")
-        textRow("Raio 1.0", "Navegador ultra leve. Sem bibliotecas extras, abre rápido em qualquer celular.") {}
+        textRow("Raio 1.1", "Navegador ultra leve. Sem bibliotecas extras, abre rápido em qualquer celular.") {}
     }
 
     private fun header(t: String) {

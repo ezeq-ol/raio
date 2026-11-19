@@ -8,7 +8,18 @@
 
 Nova base do repositório SuperLite: projeto Raio criado pelo Claude, em Kotlin com WebView do sistema, sem bibliotecas externas de runtime. O código anterior permanece no histórico Git (commit `d3dd2f3`).
 
-APK de referência: aproximadamente **58 KB**, Android 5.0 ou mais novo. O tamanho não inclui o motor WebView do sistema nem representa o consumo de memória durante o uso.
+Versão atual: **Raio 1.1**, Android 5.0 ou mais novo. O tamanho do APK não inclui o motor WebView do sistema nem representa o consumo de memória durante o uso.
+
+## Novidades da versão 1.1
+
+- Vídeo em tela cheia em uma camada preta sobre toda a janela, sem reservar espaço para as barras e margens do navegador. Oculta barras do sistema, permite a área do recorte da tela e restaura o layout ao sair.
+- Proteção agressiva ligada por padrão: lista local ampliada de domínios de anúncios/rastreadores, regras de URL, filtros visuais e uso do botão de pular anúncio do YouTube quando disponível.
+- Para ajustar: **Configurações → Proteção agressiva**. Para um site com problemas: **Menu → Desativar proteção neste site**. A exceção é salva para o hostname exato; recarregar aplica a alteração.
+- Instale o APK sobre o Raio 1.0 para atualizar. Mantém o identificador Android e a mesma assinatura local; não é preciso desinstalar.
+
+O bloqueador não é o motor do Brave nem uma implementação de EasyList. As regras são embarcadas, sem atualização automática, proxy ou envio de navegação. O WebView não intercepta todos os tipos de requisição; anúncios de vídeo do YouTube podem continuar aparecendo, inclusive inserções servidas com o conteúdo. O filtro visual depende de JavaScript. A proteção agressiva pode afetar alguns sites; use a exceção por site.
+
+Faixas pretas necessárias para preservar a proporção original do vídeo são normais. A alteração elimina o espaço do navegador ao redor do player, sem esticar nem cortar a imagem.
 
 ## Instalar no celular
 1. [Baixe Raio.apk](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk) pelo celular.
@@ -52,6 +63,14 @@ O release usa a chave de debug local para permitir instalação de desenvolvimen
 - `MainActivity.kt` navegador, abas, menu
 - `SettingsActivity.kt` configurações
 - `LibraryActivity.kt` favoritos e histórico
-- `Core.kt` preferências, tema, bloqueador
+- `Core.kt` preferências e tema
+- `AdBlock.kt` regras locais de rede
+- `ShieldScript.kt` filtros visuais e controle de pular anúncio
 - `StartPage.kt` página inicial e de erro
 - `Ic.kt` ícones desenhados em código
+
+## Validar alterações
+
+Com Gradle 8.9 e o SDK configurados, execute `gradle assembleRelease lintRelease testDebugUnitTest`. Para testar o filtro visual sem Android, execute `node tools/test-shield.cjs` (Node.js).
+
+Os testes cobrem regras de rede, preservação de URLs de reprodução/login, limites de domínio, filtros visuais e controles de pular anúncio. A confirmação visual da tela cheia ainda exige teste em aparelho; não havia dispositivo ADB conectado na preparação da versão 1.1.
