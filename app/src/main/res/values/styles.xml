@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema de abertura: fundo ja na cor certa (sem flash branco) -->
+    <style name="AppStart" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/start_bg</item>
+        <item name="android:colorAccent">#FF6B1A</item>
+    </style>
+
+    <style name="AppLight" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#FF6B1A</item>
+    </style>
+
+    <style name="AppDark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#FF8A3D</item>
+    </style>
+</resources>

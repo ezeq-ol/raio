@@ -5,3 +5,9 @@
 local.properties
 .idea/
 *.iml
+/.gradle/
+/.gradle-local/
+/.kotlin/
+**/build/
+*.apk
+*.log

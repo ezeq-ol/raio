@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="start_bg">#F3F5F7</color>
+    <color name="ic_bg">#14213D</color>
+    <color name="ic_bolt">#FFB703</color>
+</resources>
