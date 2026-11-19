@@ -6,7 +6,17 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
     <application
+        android:name=".RaioApp"
         android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
@@ -42,5 +52,16 @@
         <activity
             android:name=".LibraryActivity"
             android:exported="false" />
+        <activity android:name=".DownloadsActivity" android:exported="false" />
+        <activity android:name=".ShortcutsActivity" android:exported="false" />
+        <activity android:name=".PrivateMainActivity" android:process=":private"
+            android:exported="false" android:launchMode="singleTask"
+            android:taskAffinity="com.raio.browser.private" android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".PrivateSettingsActivity" android:process=":private" android:exported="false" />
+        <activity android:name=".PrivateLibraryActivity" android:process=":private" android:exported="false" />
+        <activity android:name=".PrivateDownloadsActivity" android:process=":private" android:exported="false" />
+        <activity android:name=".PrivateShortcutsActivity" android:process=":private" android:exported="false" />
     </application>
 </manifest>

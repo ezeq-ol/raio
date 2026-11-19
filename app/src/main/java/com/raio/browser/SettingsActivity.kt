@@ -20,7 +20,7 @@ import android.widget.TextView
 import android.widget.Toast
 
 /** Configuracoes do navegador, montadas em codigo (sem layouts XML, abre rapido). */
-class SettingsActivity : Activity() {
+open class SettingsActivity : Activity() {
     private lateinit var pal: Pal
     private lateinit var list: LinearLayout
 
@@ -77,6 +77,9 @@ class SettingsActivity : Activity() {
         choice("Mecanismo de busca", Prefs.engines.map { it.first }, Prefs.engine) { Prefs.engine = it }
         textRow("Página inicial", if (Prefs.home.isBlank()) "Página inicial do Raio (rápida)" else Prefs.home) { askHome() }
         toggle("Restaurar abas ao abrir", "Continua de onde você parou", Prefs.restoreTabs) { Prefs.restoreTabs = it }
+        textRow("Editar atalhos da página inicial", "Adicionar, editar e reorganizar até oito atalhos") {
+            startActivity(Intent(this, if (Prefs.incognito) PrivateShortcutsActivity::class.java else ShortcutsActivity::class.java))
+        }
         textRow("Definir como navegador padrão", "Abrir links de outros apps no Raio") {
             try {
                 startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
@@ -104,7 +107,10 @@ class SettingsActivity : Activity() {
         }
 
         header("Privacidade")
-        toggle("Modo anônimo", "Não salva histórico nem abas e limpa tudo ao sair", Prefs.incognito) { Prefs.incognito = it }
+        textRow(if (Prefs.incognito) "Encerrar sessão anônima" else "Abrir sessão anônima isolada",
+            if (Build.VERSION.SDK_INT >= 28) "Cookies e armazenamento separados. Downloads permanecem no aparelho." else "Disponível no Android 9 ou superior") {
+            switchPrivacy(this, !Prefs.incognito)
+        }
         toggle("Enviar \"Não rastrear\"", "Pede aos sites para não rastrear você", Prefs.dnt) { Prefs.dnt = it }
         toggle("Cookies de terceiros", "Desligado é mais privado", Prefs.thirdCookies) { Prefs.thirdCookies = it }
         toggle("Bloquear pop-ups", "Impede janelas que abrem sozinhas", Prefs.blockPopups) { Prefs.blockPopups = it }
@@ -127,8 +133,21 @@ class SettingsActivity : Activity() {
             toast("Cache e cookies apagados")
         }
 
+        header("Atualizações")
+        if (!Prefs.incognito) {
+            textRow("Verificar atualização do Raio", "Consultar versões e baixar APK pelo GitHub") { AppUpdates.check(this) }
+            textRow("Atualizar lista do bloqueador", "${AdBlock.count()} domínios ativos · fonte: repositório Raio") { FilterStore.update(this) }
+            toggle("Consultar atualizações automaticamente", "GitHub: APK uma vez ao dia; lista semanalmente. Sem envio de histórico.", Prefs.autoUpdates) { Prefs.autoUpdates = it }
+        } else textRow("Consultas suspensas no modo anônimo", "Atualize pelo navegador normal") {}
         header("Sobre")
-        textRow("Raio 1.1", "Navegador ultra leve. Sem bibliotecas extras, abre rápido em qualquer celular.") {}
+        textRow("Raio 1.2", "Navegador leve com até duas abas residentes; uma em aparelhos com pouca RAM.") {}
+        textRow("Uso local de memória", "Medições deste processo, sem envio de dados") {
+            val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val memory = am.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid())).firstOrNull()?.totalPss ?: 0
+            dlg().setTitle("Uso local")
+                .setMessage("Memória PSS do processo: ${memory / 1024} MB\nWebViews residentes: ${RaioApp.residentViews}\nInicialização da tela: ${RaioApp.screenStartupMs} ms\n\nNão inclui todos os processos do WebView nem mede bateria. O tempo considera apenas a criação desta tela do navegador.")
+                .setPositiveButton("OK", null).show()
+        }
     }
 
     private fun header(t: String) {
@@ -174,11 +193,10 @@ class SettingsActivity : Activity() {
     private fun toggle(title: String, sub: String, value: Boolean, set: (Boolean) -> Unit) {
         val sw = Switch(this).apply {
             isChecked = value
-            isClickable = false
+            setOnCheckedChangeListener { _, checked -> set(checked) }
         }
         row(title, sub, sw) {
             sw.toggle()
-            set(sw.isChecked)
         }
     }
 

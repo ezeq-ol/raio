@@ -10,14 +10,7 @@ object StartPage {
     fun html(p: Pal): String {
         val eng = Prefs.engines[Prefs.engine]
         val action = eng.second.substringBefore("?")
-        val shortcuts = Prefs.list("fav").take(8).ifEmpty {
-            listOf(
-                Entry("YouTube", "https://m.youtube.com"),
-                Entry("Wikipédia", "https://pt.m.wikipedia.org"),
-                Entry("G1", "https://g1.globo.com"),
-                Entry("Mercado Livre", "https://www.mercadolivre.com.br")
-            )
-        }
+        val shortcuts = Prefs.shortcuts()
         val tiles = StringBuilder()
         for (e in shortcuts) {
             val name = if (e.title.isBlank()) hostOf(e.url) else e.title
@@ -25,7 +18,7 @@ object StartPage {
             tiles.append("<a class=t href=\"").append(esc(e.url)).append("\"><i>").append(esc(letter))
                 .append("</i><span>").append(esc(name.take(14))).append("</span></a>")
         }
-        val incog = if (Prefs.incognito) "<p class=in>Modo anônimo ligado: nada é salvo.</p>" else ""
+        val incog = if (Prefs.incognito) "<p class=in>Sessão anônima isolada. Downloads permanecem no aparelho.</p>" else ""
         return """<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>

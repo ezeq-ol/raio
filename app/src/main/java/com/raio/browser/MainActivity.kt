@@ -45,6 +45,11 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.AutoCompleteTextView
+import android.widget.ArrayAdapter
+import android.app.ActivityManager
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicInteger
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -53,10 +58,21 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayInputStream
 
-class Tab(var url: String, var title: String)
+class Tab(@Volatile var url: String, var title: String) {
+    var view: WebView? = null
+    var state: Bundle? = null
+    var x = 0; var y = 0
+    var restoreScroll = false
+    var used = 0L
+    var config = ""
+    val blocked = AtomicInteger()
+}
+
+private data class TabSnapshot(val url: String, val title: String, val state: Bundle?, val x: Int, val y: Int)
+private data class BrowserSnapshot(val tabs: List<TabSnapshot>, val current: Int)
 
 @Suppress("DEPRECATION")
-class MainActivity : Activity() {
+open class MainActivity : Activity() {
     private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     private val MAX_TABS = 8
     private val DESKTOP_UA =
@@ -69,17 +85,23 @@ class MainActivity : Activity() {
     private lateinit var bottomBar: LinearLayout
     private lateinit var findBar: LinearLayout
     private lateinit var findBox: EditText
-    private lateinit var urlBox: EditText
+    private lateinit var urlBox: AutoCompleteTextView
     private lateinit var progress: ProgressBar
     private lateinit var content: FrameLayout
     private lateinit var full: FrameLayout
     private lateinit var btnBack: Ic
     private lateinit var btnFwd: Ic
     private lateinit var btnTabs: Ic
+    private lateinit var shieldButton: TextView
+    private lateinit var sitePermissions: SitePermissions
+    private var lastShortcuts = ""
     private lateinit var btnReload: Ic
 
     private val tabs = mutableListOf<Tab>()
     private var cur = 0
+    private var tabClock = 0L
+    private var fileRequestCode = 1000
+    private var activeFileRequestCode: Int? = null
     private var mobileUA = ""
     private var appliedDesktop = false
     private var loading = false
@@ -97,23 +119,34 @@ class MainActivity : Activity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        if ((this is PrivateMainActivity && Build.VERSION.SDK_INT < 28) || intent.getBooleanExtra("exitPrivate", false)) { finish(); return }
+        val started = SystemClock.elapsedRealtime()
         Prefs.init(this)
+        if (Prefs.incognito) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         pal = Pal(isDark(this))
         buildUi()
-        setupWeb()
+        sitePermissions = SitePermissions(this) { if (::web.isInitialized) web.url ?: pageUrl else "" }
 
-        if (Prefs.restoreTabs && !Prefs.incognito) {
+        val retained = lastNonConfigurationInstance as? BrowserSnapshot
+        if (retained != null) {
+            retained.tabs.take(MAX_TABS).forEach { t ->
+                tabs.add(Tab(t.url, t.title).apply { state = t.state; x = t.x; y = t.y })
+            }
+        } else if (Prefs.restoreTabs && !Prefs.incognito) {
             Prefs.list("tabs").take(MAX_TABS).forEach { tabs.add(Tab(it.url, it.title)) }
         }
         if (tabs.isEmpty()) tabs.add(Tab(homeUrl(), ""))
-        cur = Prefs.curTab.coerceIn(0, tabs.size - 1)
-        load(tabs[cur].url)
+        cur = (retained?.current ?: Prefs.curTab).coerceIn(0, tabs.size - 1)
+        showTab(cur)
         handleIntent(intent)
+        RaioApp.screenStartupMs = SystemClock.elapsedRealtime() - started
+        AppUpdates.automatic(this)
     }
 
     override fun onNewIntent(i: Intent) {
         super.onNewIntent(i)
         setIntent(i)
+        if (i.getBooleanExtra("exitPrivate", false) && Prefs.incognito) { finishAndRemoveTask(); return }
         handleIntent(i)
     }
 
@@ -127,10 +160,15 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (!::web.isInitialized) return
         if (isDark(this) != pal.dark) {
             recreate()
             return
         }
+        refreshSuggestions()
+        val shortcuts = Prefs.shortcuts().joinToString { it.title + it.url }
+        if (lastShortcuts != shortcuts && tabs[cur].url == HOME) load(HOME)
+        lastShortcuts = shortcuts
         applyWebSettings()
         if (customView == null) applyBars() else applyImmersive()
         val shield = shieldState()
@@ -139,10 +177,16 @@ class MainActivity : Activity() {
         web.onResume()
     }
 
+    @Deprecated("Activity retention API")
+    override fun onRetainNonConfigurationInstance(): Any {
+        tabs.forEach { rememberTab(it) }
+        return BrowserSnapshot(tabs.map { TabSnapshot(it.url, it.title, it.state, it.x, it.y) }, cur)
+    }
+
     override fun onPause() {
         super.onPause()
-        web.onPause()
-        saveTabs()
+        if (::web.isInitialized) web.onPause()
+        if (::web.isInitialized) saveTabs()
     }
 
     private fun saveTabs() {
@@ -152,11 +196,17 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing && (Prefs.incognito || Prefs.clearExit)) clearBrowsingData()
+        if (::web.isInitialized && isFinishing && (Prefs.incognito || Prefs.clearExit)) clearBrowsingData()
         if (customView != null) hideCustom()
-        content.removeView(web)
-        web.destroy()
+        if (::sitePermissions.isInitialized) sitePermissions.cancel()
+        fileCb?.onReceiveValue(null); fileCb = null; activeFileRequestCode = null
+        tabs.forEach { releaseTab(it) }
         super.onDestroy()
+        if (isFinishing && Prefs.incognito) {
+            if (Build.VERSION.SDK_INT >= 24) deleteSharedPreferences("raio_private")
+            runCatching { RaioApp.clearPrivateProfiles(this) }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
     }
 
     private fun clearBrowsingData() {
@@ -183,7 +233,10 @@ class MainActivity : Activity() {
         bottomBar.setBackgroundColor(c)
         urlBox.background = round(if (incog) 0x33FFFFFF else pal.field, dp(20).toFloat())
         val iconCol = if (incog) Color.WHITE else pal.text
-        for (ic in listOf(btnBack, btnFwd, btnTabs, btnReload)) ic.col = iconCol
+        btnReload.col = iconCol; btnReload.invalidate()
+        for (i in 0 until bottomBar.childCount) (bottomBar.getChildAt(i) as? Ic)?.let { it.col = iconCol; it.invalidate() }
+        shieldButton.setTextColor(iconCol)
+        urlBox.hint = if (incog) "Anônimo · pesquisar ou digitar endereço" else "Pesquisar ou digitar endereço"
         urlBox.setTextColor(iconCol)
         urlBox.setHintTextColor(if (incog) 0xFFBBB0D0.toInt() else pal.sub)
         root.setBackgroundColor(c)
@@ -209,7 +262,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), 0, dp(4), 0)
         }
-        urlBox = EditText(this).apply {
+        urlBox = AutoCompleteTextView(this).apply {
+            threshold = 1
             hint = "Pesquisar ou digitar endereço"
             textSize = 15f
             setSingleLine()
@@ -236,6 +290,12 @@ class MainActivity : Activity() {
             setOnClickListener { if (loading) web.stopLoading() else web.reload() }
         }
         topBar.addView(urlBox, LinearLayout.LayoutParams(0, dp(40), 1f))
+        shieldButton = TextView(this).apply {
+            text = "● 0"; textSize = 13f; gravity = Gravity.CENTER
+            contentDescription = "Proteção e permissões deste site"
+            setOnClickListener { showSiteControls() }
+        }
+        topBar.addView(shieldButton, LinearLayout.LayoutParams(dp(52), dp(46)))
         topBar.addView(btnReload, LinearLayout.LayoutParams(dp(46), dp(46)))
         root.addView(topBar, LinearLayout.LayoutParams(MATCH, dp(52)))
 
@@ -311,8 +371,11 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- WebView
 
-    private fun setupWeb() {
+    private fun setupWeb(owner: Tab) {
         web = WebView(this)
+        owner.view = web
+        RaioApp.residentViews++
+        val tabView = web
         web.setBackgroundColor(pal.bg)
         content.addView(web, 0, FrameLayout.LayoutParams(MATCH, MATCH))
         mobileUA = web.settings.userAgentString.replace("; wv", "").replace("Version/4.0 ", "")
@@ -323,21 +386,30 @@ class MainActivity : Activity() {
                 val sch = r.url.scheme ?: ""
                 if (sch == "http" || sch == "https" || sch == "about" || sch == "data" || sch == "blob" || sch == "javascript") return false
                 if (sch == "file") return true
-                if (Prefs.blockPopups && (!r.isForMainFrame || !r.hasGesture())) return true
+                if (Prefs.sitePopups(owner.url) && (!r.isForMainFrame || !r.hasGesture())) return true
                 openExternal(r.url.toString())
                 return true
             }
 
             override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? {
-                if (Prefs.shieldEnabled(pageUrl) && !r.isForMainFrame &&
-                    AdBlock.shouldBlock(r.url.toString(), pageUrl, Prefs.aggressive)) {
+                if (Prefs.shieldEnabled(owner.url) && !r.isForMainFrame &&
+                    AdBlock.shouldBlock(r.url.toString(), owner.url, Prefs.aggressive)) {
+                    val count = owner.blocked.incrementAndGet()
+                    if (count <= 3 || count % 10 == 0) runOnUiThread { if (!isFinishing && !isDestroyed && owner.view === tabView && web === tabView) updateNav() }
                     return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
                 }
                 return null
             }
 
             override fun onPageStarted(v: WebView, url: String?, f: Bitmap?) {
-                pageUrl = url ?: ""
+                if (owner.view !== v) return
+                owner.url = url ?: owner.url
+                owner.blocked.set(0)
+                owner.config = stateFor(owner.url)
+                if (v !== web) return
+                sitePermissions.cancel()
+                pageUrl = owner.url
+                applyWebSettings()
                 appliedShield = shieldState()
                 loading = true
                 btnReload.let { setReloadKind(true) }
@@ -345,54 +417,65 @@ class MainActivity : Activity() {
             }
 
             override fun onPageFinished(v: WebView, url: String?) {
+                if (owner.view !== v || !tabs.contains(owner)) return
+                if (url != null && !url.startsWith("data:")) owner.url = url
+                if (owner.restoreScroll) {
+                    owner.restoreScroll = false
+                    val x = owner.x; val y = owner.y
+                    v.post { if (owner.view === v) v.scrollTo(x, y) }
+                }
+                if (owner.url != HOME && !owner.url.startsWith("data:") && v.title != StartPage.ERR_TITLE) {
+                    owner.title = v.title ?: owner.url
+                    addHistory(owner.title, owner.url)
+                }
+                injectShield(v, owner.url)
+                if (v !== web) return
                 loading = false
                 setReloadKind(false)
                 syncUrl(url)
-                val u = url ?: return
-                val t = tabs[cur]
-                if (u != HOME && !u.startsWith("data:") && v.title != StartPage.ERR_TITLE) {
-                    t.title = v.title ?: u
-                    addHistory(t.title, u)
-                }
-                injectShield()
+                refreshSuggestions()
                 updateNav()
             }
 
             override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
+                if (owner.view !== v) return
+                if (url != null && !url.startsWith("data:")) owner.url = url
+                injectShield(v, owner.url)
+                if (v !== web) return
                 syncUrl(url)
-                pageUrl = url ?: pageUrl
-                injectShield()
+                pageUrl = owner.url
                 updateNav()
             }
 
             @android.annotation.TargetApi(23)
             override fun onReceivedError(v: WebView, r: WebResourceRequest, e: WebResourceError) {
-                if (r.isForMainFrame) showError(r.url.toString(), e.description?.toString() ?: "")
+                if (v === web && r.isForMainFrame) showError(r.url.toString(), e.description?.toString() ?: "")
             }
 
             @Deprecated("Deprecated in Java")
             override fun onReceivedError(v: WebView, code: Int, desc: String?, failing: String?) {
-                if (Build.VERSION.SDK_INT < 23 && failing != null) showError(failing, desc ?: "")
+                if (v === web && Build.VERSION.SDK_INT < 23 && failing != null) showError(failing, desc ?: "")
             }
 
             override fun onReceivedSslError(v: WebView, h: SslErrorHandler, e: SslError) {
                 h.cancel()
-                showError(e.url ?: "", "Conexão não segura (certificado inválido).")
+                if (v === web) showError(e.url ?: "", "Conexão não segura (certificado inválido).")
             }
         }
 
         web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(v: WebView, p: Int) {
+                if (owner.view !== v || v !== web) return
                 progress.progress = p
                 progress.visibility = if (p < 100) View.VISIBLE else View.GONE
             }
 
             override fun onReceivedTitle(v: WebView, t: String?) {
-                if (t != null && v.url != HOME) tabs[cur].title = t
+                if (owner.view === v && t != null && v.url != HOME) owner.title = t
             }
 
             override fun onShowCustomView(view: View, cb: CustomViewCallback) {
-                if (customView != null) {
+                if (tabView !== web || customView != null) {
                     cb.onCustomViewHidden()
                     return
                 }
@@ -408,13 +491,16 @@ class MainActivity : Activity() {
                 setFullscreen(true)
             }
 
-            override fun onHideCustomView() = hideCustom()
+            override fun onHideCustomView() { if (tabView === web) hideCustom() }
 
             override fun onShowFileChooser(v: WebView, cb: ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean {
+                if (tabView !== web) return false
                 fileCb?.onReceiveValue(null)
                 fileCb = cb
+                fileRequestCode = if (fileRequestCode >= 65000) 1000 else fileRequestCode + 1
+                activeFileRequestCode = fileRequestCode
                 return try {
-                    startActivityForResult(p.createIntent(), 12)
+                    startActivityForResult(p.createIntent(), fileRequestCode)
                     true
                 } catch (_: Exception) {
                     fileCb = null
@@ -422,19 +508,24 @@ class MainActivity : Activity() {
                 }
             }
 
-            override fun onPermissionRequest(r: PermissionRequest) = r.deny()
+            override fun onPermissionRequest(r: PermissionRequest) {
+                if (owner.view === tabView && tabView === web && !isFinishing) sitePermissions.media(r) else r.deny()
+            }
+            override fun onPermissionRequestCanceled(r: PermissionRequest) = sitePermissions.cancelled(r)
 
             override fun onGeolocationPermissionsShowPrompt(o: String, cb: android.webkit.GeolocationPermissions.Callback) {
-                cb.invoke(o, false, false)
+                if (tabView === web) sitePermissions.location(o, cb) else cb.invoke(o, false, false)
             }
 
             override fun onJsAlert(v: WebView, url: String?, m: String?, r: JsResult): Boolean {
+                if (owner.view !== v || v !== web) { r.cancel(); return true }
                 dlg().setMessage(m).setPositiveButton("OK") { _, _ -> r.confirm() }
                     .setOnCancelListener { r.cancel() }.show()
                 return true
             }
 
             override fun onJsConfirm(v: WebView, url: String?, m: String?, r: JsResult): Boolean {
+                if (owner.view !== v || v !== web) { r.cancel(); return true }
                 dlg().setMessage(m).setPositiveButton("OK") { _, _ -> r.confirm() }
                     .setNegativeButton("Cancelar") { _, _ -> r.cancel() }
                     .setOnCancelListener { r.cancel() }.show()
@@ -462,15 +553,15 @@ class MainActivity : Activity() {
 
     private fun applyWebSettings() {
         val s = web.settings
-        s.javaScriptEnabled = Prefs.js
+        s.javaScriptEnabled = Prefs.siteJs(pageUrl)
         s.domStorageEnabled = true
         s.allowFileAccess = false
         s.allowContentAccess = false
-        s.setGeolocationEnabled(false)
+        s.setGeolocationEnabled(!Prefs.permissionBlocked(pageUrl, "location"))
         s.mediaPlaybackRequiresUserGesture = true
-        s.javaScriptCanOpenWindowsAutomatically = !Prefs.blockPopups
+        s.javaScriptCanOpenWindowsAutomatically = !Prefs.sitePopups(pageUrl)
         // Unhandled popup windows are rejected by WebChromeClient.
-        s.setSupportMultipleWindows(Prefs.blockPopups)
+        s.setSupportMultipleWindows(Prefs.sitePopups(pageUrl))
         s.blockNetworkImage = Prefs.blockImages
         s.textZoom = Prefs.textSize
         s.setSupportZoom(true)
@@ -484,7 +575,7 @@ class MainActivity : Activity() {
             s.forceDark = if (Prefs.webDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
         CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(web, Prefs.thirdCookies)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, Prefs.siteCookies(pageUrl))
         if (appliedDesktop != Prefs.desktop) {
             val first = !appliedDesktop && !Prefs.desktop
             appliedDesktop = Prefs.desktop
@@ -507,7 +598,7 @@ class MainActivity : Activity() {
     private fun refreshUrlBox() {
         if (urlBox.hasFocus()) return
         val u = tabs[cur].url
-        urlBox.setText(if (u == HOME || u.startsWith("data:")) "" else hostOf(u))
+        urlBox.setText(if (u == HOME || u.startsWith("data:")) "" else (if (u.startsWith("http://")) "HTTP · " else "") + hostOf(u))
     }
 
     private fun syncUrl(url: String?) {
@@ -535,6 +626,7 @@ class MainActivity : Activity() {
         btnFwd.isEnabled = web.canGoForward()
         btnTabs.badge = tabs.size.toString()
         btnTabs.invalidate()
+        shieldButton.text = (if (Prefs.shieldEnabled(pageUrl)) "● " else "○ ") + tabs.getOrNull(cur)?.blocked?.get().toString()
     }
 
     private fun go(input: String) {
@@ -546,6 +638,7 @@ class MainActivity : Activity() {
         tabs[cur].url = u
         pageUrl = u
         appliedShield = shieldState()
+        applyWebSettings()
         closeFind()
         if (u == HOME) {
             web.loadDataWithBaseURL(HOME, StartPage.html(if (Prefs.incognito) Pal(true) else pal), "text/html", "utf-8", HOME)
@@ -560,36 +653,82 @@ class MainActivity : Activity() {
         updateNav()
     }
 
+    private fun rememberTab(tab: Tab) {
+        tab.view?.let { v ->
+            tab.x = v.scrollX; tab.y = v.scrollY
+            tab.state = Bundle().also { v.saveState(it) }
+        }
+    }
+
+    private fun releaseTab(tab: Tab) {
+        val v = tab.view ?: return
+        tab.view = null
+        (v.parent as? ViewGroup)?.removeView(v)
+        v.stopLoading(); v.onPause(); v.destroy()
+        RaioApp.residentViews--
+    }
+
+    private fun trimTabs(limit: Int) {
+        val inactive = tabs.filter { it.view != null && it !== tabs.getOrNull(cur) }.sortedBy { it.used }
+        var resident = tabs.count { it.view != null }
+        for (tab in inactive) {
+            if (resident <= limit) break
+            rememberTab(tab); releaseTab(tab); resident--
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) trimTabs(1)
+    }
+
     private fun showTab(i: Int) {
+        if (customView != null) hideCustom()
+        sitePermissions.cancel()
+        fileCb?.onReceiveValue(null); fileCb = null; activeFileRequestCode = null
+        if (::web.isInitialized && web.parent === content) {
+            tabs.getOrNull(cur)?.let { rememberTab(it) }
+            web.onPause()
+            content.removeView(web)
+        }
         cur = i
-        load(tabs[i].url)
+        val tab = tabs[i]
+        pageUrl = tab.url
+        tab.used = ++tabClock
+        closeFind()
+        if (tab.view == null) {
+            setupWeb(tab)
+            tab.restoreScroll = tab.state != null
+            val restored = tab.state?.let { web.restoreState(it) != null } ?: false
+            if (!restored || tab.url == HOME) load(tab.url)
+        } else {
+            web = tab.view!!
+            content.addView(web, 0, FrameLayout.LayoutParams(MATCH, MATCH))
+            applyWebSettings()
+            if (tab.config != stateFor(tab.url)) web.reload()
+        }
+        web.onResume()
+        loading = web.progress < 100
+        setReloadKind(loading)
+        appliedShield = shieldState()
+        refreshUrlBox(); updateNav(); applyBars()
+        val lowRam = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isLowRamDevice
+        trimTabs(if (lowRam) 1 else 2)
     }
 
     private fun newTab(url: String = homeUrl()) {
-        if (tabs.size >= MAX_TABS) {
-            toast("Limite de $MAX_TABS abas (modo leve)")
-            return
-        }
+        if (tabs.size >= MAX_TABS) { toast("Limite de $MAX_TABS abas (modo leve)"); return }
         tabs.add(Tab(url, ""))
-        cur = tabs.size - 1
-        load(url)
+        showTab(tabs.lastIndex)
     }
 
     private fun closeTab(i: Int) {
+        val current = i == cur
+        releaseTab(tabs[i])
         tabs.removeAt(i)
-        if (tabs.isEmpty()) {
-            tabs.add(Tab(homeUrl(), ""))
-            cur = 0
-            load(tabs[0].url)
-            return
-        }
-        if (i < cur) {
-            cur--
-            updateNav()
-        } else if (i == cur) {
-            cur = minOf(cur, tabs.size - 1)
-            load(tabs[cur].url)
-        } else updateNav()
+        if (tabs.isEmpty()) tabs.add(Tab(homeUrl(), ""))
+        if (current) { cur = -1; showTab(minOf(i, tabs.lastIndex)) }
+        else { if (i < cur) cur--; updateNav() }
     }
 
     private fun addHistory(title: String, url: String) {
@@ -668,10 +807,11 @@ class MainActivity : Activity() {
         d = dlg().setTitle("Abas (${tabs.size})").setView(sv)
             .setPositiveButton("Nova aba") { _, _ -> newTab() }
             .setNeutralButton("Fechar todas") { _, _ ->
+                tabs.forEach { releaseTab(it) }
                 tabs.clear()
                 tabs.add(Tab(homeUrl(), ""))
-                cur = 0
-                load(tabs[0].url)
+                cur = -1
+                showTab(0)
             }
             .create()
         d.show()
@@ -694,13 +834,9 @@ class MainActivity : Activity() {
             (if (isFav) "Remover dos favoritos" else "Adicionar aos favoritos") to { toggleFav() },
             "Favoritos" to { openLibrary("fav") },
             "Histórico" to { openLibrary("hist") },
-            "Downloads" to {
-                try {
-                    startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
-                } catch (_: Exception) {
-                    toast("Abra o app Arquivos para ver seus downloads")
-                }
-            },
+            "Downloads" to { startActivity(Intent(this, if (Prefs.incognito) PrivateDownloadsActivity::class.java else DownloadsActivity::class.java)) },
+            "Proteção e permissões deste site" to { showSiteControls() },
+            "Editar atalhos" to { startActivity(Intent(this, if (Prefs.incognito) PrivateShortcutsActivity::class.java else ShortcutsActivity::class.java)) },
             "Localizar na página" to { openFind() },
             "Compartilhar página" to { sharePage() },
             (if (Prefs.desktop) "Versão para celular" else "Versão para computador") to {
@@ -708,12 +844,9 @@ class MainActivity : Activity() {
                 applyWebSettings()
             },
             (if (Prefs.incognito) "Desligar modo anônimo" else "Ligar modo anônimo") to {
-                Prefs.incognito = !Prefs.incognito
-                applyBars()
-                toast(if (Prefs.incognito) "Modo anônimo: nada será salvo" else "Modo anônimo desligado")
-                if (tabs[cur].url == HOME) load(HOME)
+                switchPrivacy(this, !Prefs.incognito)
             },
-            "Configurações" to { startActivity(Intent(this, SettingsActivity::class.java)) },
+            "Configurações" to { startActivity(Intent(this, if (Prefs.incognito) PrivateSettingsActivity::class.java else SettingsActivity::class.java)) },
             "Sair" to {
                 if (Prefs.incognito || Prefs.clearExit) clearBrowsingData()
                 finishAndRemoveTask()
@@ -759,16 +892,18 @@ class MainActivity : Activity() {
     }
 
     private fun openLibrary(mode: String) {
-        startActivityForResult(Intent(this, LibraryActivity::class.java).putExtra("mode", mode), 11)
+        startActivityForResult(Intent(this, if (Prefs.incognito) PrivateLibraryActivity::class.java else LibraryActivity::class.java).putExtra("mode", mode), 11)
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         if (req == 11 && res == RESULT_OK && data != null) {
             val u = data.getStringExtra("url") ?: return
             if (data.getBooleanExtra("newtab", false)) newTab(u) else load(u)
-        } else if (req == 12) {
-            fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data))
-            fileCb = null
+        } else if (req in 1000..65000) {
+            if (req == activeFileRequestCode) {
+                fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data))
+                fileCb = null; activeFileRequestCode = null
+            }
         } else super.onActivityResult(req, res, data)
     }
 
@@ -800,20 +935,14 @@ class MainActivity : Activity() {
         }
         try {
             val name = URLUtil.guessFileName(url, cd, mime)
-            val r = DownloadManager.Request(Uri.parse(url))
-            if (!mime.isNullOrEmpty()) r.setMimeType(mime)
-            CookieManager.getInstance().getCookie(url)?.let { r.addRequestHeader("Cookie", it) }
-            if (!ua.isNullOrEmpty()) r.addRequestHeader("User-Agent", ua)
-            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(r)
-            toast("Baixando: $name")
+            DownloadRecords.enqueue(this, url, name, mime, ua, CookieManager.getInstance().getCookie(url))
         } catch (_: Exception) {
             toast("Falha ao iniciar o download")
         }
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
+        if (code == 55) { sitePermissions.runtimeResult(res); return }
         if (code == 21 && res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED) {
             pendingDl?.let { download(it[0], it[1], it[2], it[3]) }
         }
@@ -840,12 +969,54 @@ class MainActivity : Activity() {
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(root.windowToken, 0)
     }
 
-    private fun shieldState() = "${Prefs.shieldEnabled(pageUrl)}:${Prefs.aggressive}"
+    private fun stateFor(url: String) = listOf(Prefs.shieldEnabled(url), Prefs.aggressive,
+        Prefs.siteJs(url), Prefs.siteCookies(url), Prefs.sitePopups(url), Prefs.blockImages,
+        Prefs.desktop, Prefs.textSize, Prefs.webDark).joinToString(":")
+    private fun shieldState() = stateFor(pageUrl)
 
-    private fun injectShield() {
-        if (Prefs.js && Prefs.aggressive && Prefs.shieldEnabled(pageUrl)) {
-            web.evaluateJavascript(ShieldScript.source, null)
+    private fun injectShield(view: WebView = web, url: String = pageUrl) {
+        if (Prefs.siteJs(url) && Prefs.aggressive && Prefs.shieldEnabled(url)) {
+            view.evaluateJavascript(ShieldScript.source, null)
         }
+    }
+
+    private fun refreshSuggestions() {
+        val entries = (Prefs.list("fav") + if (Prefs.incognito) emptyList() else Prefs.list("hist"))
+            .distinctBy { it.url }.take(80)
+        val labels = entries.map { (it.title.ifBlank { hostOf(it.url) }) + " — " + it.url }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, labels)
+        urlBox.setAdapter(adapter)
+        urlBox.setOnItemClickListener { _, _, position, _ ->
+            val label = adapter.getItem(position)
+            val entry = entries.getOrNull(labels.indexOf(label)) ?: return@setOnItemClickListener
+            urlBox.dismissDropDown()
+            go(entry.url)
+        }
+    }
+
+    private fun showSiteControls() {
+        val url = pageUrl
+        if (AdBlock.host(url).isEmpty()) { toast("Abra um site primeiro"); return }
+        val status = if (SitePolicy.secure(url)) "HTTPS (conexão criptografada)" else "HTTP: conexão sem criptografia"
+        val choices = arrayOf(
+            "JavaScript: " + if (Prefs.siteJs(url)) "permitido" else "bloqueado",
+            "Cookies de terceiros: " + if (Prefs.siteCookies(url)) "permitidos" else "bloqueados",
+            "Pop-ups: " + if (Prefs.sitePopups(url)) "bloqueados" else "permitidos",
+            "Câmera: " + if (Prefs.permissionBlocked(url, "camera")) "bloqueada" else "perguntar",
+            "Microfone: " + if (Prefs.permissionBlocked(url, "mic")) "bloqueado" else "perguntar",
+            "Localização: " + if (Prefs.permissionBlocked(url, "location")) "bloqueada" else "perguntar"
+        )
+        dlg().setTitle("${SitePolicy.origin(url)}\n$status\n${tabs[cur].blocked.get()} requisições bloqueadas")
+            .setItems(choices) { _, choice ->
+                when (choice) {
+                    0 -> Prefs.siteFlag(url, "siteJs", !Prefs.siteJs(url))
+                    1 -> Prefs.siteFlag(url, "siteCookies", !Prefs.siteCookies(url))
+                    2 -> Prefs.siteFlag(url, "sitePopups", !Prefs.sitePopups(url))
+                    else -> { val key = listOf("camera", "mic", "location")[choice - 3]; Prefs.setPermissionBlocked(url, key, !Prefs.permissionBlocked(url, key)) }
+                }
+                sitePermissions.cancel()
+                applyWebSettings(); web.reload()
+            }.setPositiveButton("Fechar", null).show()
     }
 
     private fun applyImmersive() {

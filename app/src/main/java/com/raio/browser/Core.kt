@@ -20,7 +20,21 @@ object Prefs {
     private lateinit var sp: SharedPreferences
 
     fun init(c: Context) {
-        if (!::sp.isInitialized) sp = c.applicationContext.getSharedPreferences("raio", Context.MODE_PRIVATE)
+        if (::sp.isInitialized) return
+        val normal = c.applicationContext.getSharedPreferences("raio", Context.MODE_PRIVATE)
+        if (!RaioApp.privateMode) { sp = normal; return }
+        sp = c.applicationContext.getSharedPreferences("raio_private", Context.MODE_PRIVATE)
+        val e = sp.edit().clear()
+        for ((k, v) in normal.all) {
+            if (k in setOf("hist", "tabs", "downloads", "incognito")) continue
+            when (v) {
+                is String -> e.putString(k, v)
+                is Boolean -> e.putBoolean(k, v)
+                is Int -> e.putInt(k, v)
+                is Long -> e.putLong(k, v)
+            }
+        }
+        e.commit()
     }
 
     val engines = listOf(
@@ -40,6 +54,7 @@ object Prefs {
             is Boolean -> e.putBoolean(k, v)
             is Int -> e.putInt(k, v)
             is String -> e.putString(k, v)
+            is Long -> e.putLong(k, v)
         }
         e.apply()
     }
@@ -59,7 +74,19 @@ object Prefs {
     var textSize: Int get() = i("textSize", 100); set(v) = put("textSize", v)
     var theme: Int get() = i("theme", 0); set(v) = put("theme", v) // 0 sistema, 1 claro, 2 escuro
     var webDark: Boolean get() = b("webDark", false); set(v) = put("webDark", v)
-    var incognito: Boolean get() = b("incognito", false); set(v) = put("incognito", v)
+    val incognito: Boolean get() = RaioApp.privateMode
+    var autoUpdates: Boolean get() = b("autoUpdates", true); set(v) = put("autoUpdates", v)
+    var updateCheckedAt: Long get() = sp.getLong("updateCheckedAt", 0); set(v) = put("updateCheckedAt", v)
+    var filterCheckedAt: Long get() = sp.getLong("filterCheckedAt", 0); set(v) = put("filterCheckedAt", v)
+    fun siteJs(url: String) = b("siteJs:" + AdBlock.host(url), js)
+    fun siteCookies(url: String) = b("siteCookies:" + AdBlock.host(url), thirdCookies)
+    fun sitePopups(url: String) = b("sitePopups:" + AdBlock.host(url), blockPopups)
+    fun siteFlag(url: String, key: String, value: Boolean) = put(key + ":" + AdBlock.host(url), value)
+    fun permissionBlocked(url: String, key: String) = b("deny:$key:" + SitePolicy.origin(url), false)
+    fun setPermissionBlocked(url: String, key: String, value: Boolean) = put("deny:$key:" + SitePolicy.origin(url), value)
+    fun shortcuts(): List<Entry> = if (sp.contains("shortcuts")) list("shortcuts") else list("fav").take(8).ifEmpty {
+        listOf(Entry("YouTube", "https://m.youtube.com"), Entry("Wikipédia", "https://pt.m.wikipedia.org"), Entry("G1", "https://g1.globo.com"), Entry("Mercado Livre", "https://www.mercadolivre.com.br"))
+    }
     var dnt: Boolean get() = b("dnt", true); set(v) = put("dnt", v)
     var thirdCookies: Boolean get() = b("thirdCookies", false); set(v) = put("thirdCookies", v)
     var blockPopups: Boolean get() = b("blockPopups", true); set(v) = put("blockPopups", v)
@@ -80,6 +107,7 @@ object Prefs {
     }
 
     fun saveList(key: String, l: List<Entry>) {
+        if (incognito && (key == "hist" || key == "tabs")) return
         val a = JSONArray()
         for (e in l) a.put(JSONObject().put("t", e.title).put("u", e.url))
         put(key, a.toString())

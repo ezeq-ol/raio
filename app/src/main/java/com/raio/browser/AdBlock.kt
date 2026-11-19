@@ -5,6 +5,9 @@ import java.util.Locale
 
 /** Local, deterministic network rules. No proxy, remote requests or browsing telemetry. */
 object AdBlock {
+    @Volatile private var extra: Set<String>? = null
+    fun replaceExtra(domains: Set<String>) { extra = domains.takeIf { it.isNotEmpty() }?.toSet() }
+    fun count() = (extra ?: hosts).size
     private val hosts = hashSetOf(
         "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com",
         "googletagservices.com", "adservice.google.com", "adsystem.com", "amazon-adsystem.com",
@@ -50,7 +53,7 @@ object AdBlock {
     fun blocked(host: String?): Boolean {
         var h = host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return false
         while (h.isNotEmpty()) {
-            if (hosts.contains(h)) return true
+            if ((extra ?: hosts).contains(h)) return true
             val i = h.indexOf('.')
             if (i < 0) return false
             h = h.substring(i + 1)

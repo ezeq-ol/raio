@@ -1,76 +1,70 @@
-# Raio — navegador ultra leve para Android
+# Raio — navegador leve para Android
 
-## Baixar o aplicativo
+**[⬇ Baixar Raio.apk atualizado](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk)** · [Versões anteriores](https://github.com/ezeq-ol/raio/releases)
 
-**[⬇ Baixar Raio.apk para Android](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk)**
+Versão **1.2**. Android 5.0 ou superior; sessão anônima isolada requer Android 9 ou superior. Kotlin e WebView do sistema, sem bibliotecas externas de runtime. O APK não contém o motor WebView; seu tamanho não representa o consumo de RAM ou armazenamento durante a navegação.
 
-[Ver versões e arquivos para download](https://github.com/ezeq-ol/raio/releases). Android 5.0 ou superior.
+## Novidades da versão 1.2
 
-Nova base do repositório SuperLite: projeto Raio criado pelo Claude, em Kotlin com WebView do sistema, sem bibliotecas externas de runtime. O código anterior permanece no histórico Git (commit `d3dd2f3`).
+- **Abas com limite de memória:** até oito abas, com até duas WebViews residentes por processo (uma em aparelhos identificados como de pouca RAM). As abas residentes preservam a página e seus formulários; as demais são suspensas com histórico e posição de rolagem na memória. Ao retornar a uma aba suspensa, seu conteúdo pode ser recarregado e formulários não são garantidos. Ao fechar o processo, só as URLs são restauradas, se habilitado.
+- **Atualizações pelo GitHub:** Configurações → Verificar atualização do Raio. Ao abrir o navegador, consulta versões se passou um dia e listas se passou uma semana; isso pode ser desativado nas configurações. Baixar é uma escolha explícita; o Android confirma a instalação e, quando necessário, solicita autorização para instalar APKs pelo Raio.
+- **Lista do bloqueador atualizável:** Configurações → Atualizar lista do bloqueador. Atualização por HTTPS a partir de `app/src/main/assets/domains.txt` deste repositório, sem trocar o APK. Domínios são validados, respostas e contagem são limitadas, e falhas mantêm a lista anterior. A lista é mantida no projeto; não é EasyList nem o motor do Brave.
+- **Contador por aba:** o botão ● mostra o número de requisições de rede bloqueadas na navegação atual, sem contar elementos escondidos por filtros visuais. Menu → Desativar proteção neste site salva uma exceção para o hostname exato.
+- **Sessão anônima isolada:** Android 9+ usa processo e diretório WebView separados, com cookies e armazenamento distintos do modo normal. Menu → Ligar modo anônimo; use Desligar modo anônimo ou Sair para encerrar. Configurações, favoritos e atalhos alterados na sessão privada são temporários; não alteram os dados normais. Capturas e miniaturas são bloqueadas nessa sessão.
+- **Downloads no navegador:** Menu → Downloads mostra progresso, conclusão e erros, e abre arquivos concluídos. Remover um registro não remove o arquivo. Downloads comuns são salvos na pasta pública Downloads; APKs baixados pelo verificador de versões ficam na pasta de downloads externa do próprio app.
+- **Controles por site:** toque no botão ● ou abra Menu → Proteção e permissões deste site. Ajuste JavaScript, cookies de terceiros e pop-ups por hostname; câmera, microfone e localização aproximada podem ser bloqueados por origem. Quando configurados para perguntar, só são autorizados após confirmação para o site HTTPS atual e permissão do Android. Cada solicitação pede consentimento novamente.
+- **Interface:** aviso HTTP na barra, sugestões locais de favoritos/histórico e até oito atalhos editáveis e reorganizáveis em Menu → Editar atalhos.
+- **Medições locais:** Configurações → Uso local de memória mostra PSS do processo, WebViews residentes e duração da criação da tela. Não representa todos os processos do WebView nem mede bateria.
 
-Versão atual: **Raio 1.1**, Android 5.0 ou mais novo. O tamanho do APK não inclui o motor WebView do sistema nem representa o consumo de memória durante o uso.
+## Instalar e atualizar
 
-## Novidades da versão 1.1
+1. Baixe o APK pelo link acima.
+2. Abra o arquivo e siga as confirmações de instalação do Android.
+3. Instale sobre o Raio anterior para manter seus dados. A versão 1.2 mantém `com.raio.browser` e a assinatura de desenvolvimento das versões anteriores.
 
-- Vídeo em tela cheia em uma camada preta sobre toda a janela, sem reservar espaço para as barras e margens do navegador. Oculta barras do sistema, permite a área do recorte da tela e restaura o layout ao sair.
-- Proteção agressiva ligada por padrão: lista local ampliada de domínios de anúncios/rastreadores, regras de URL, filtros visuais e uso do botão de pular anúncio do YouTube quando disponível.
-- Para ajustar: **Configurações → Proteção agressiva**. Para um site com problemas: **Menu → Desativar proteção neste site**. A exceção é salva para o hostname exato; recarregar aplica a alteração.
-- Instale o APK sobre o Raio 1.0 para atualizar. Mantém o identificador Android e a mesma assinatura local; não é preciso desinstalar.
+O SuperLite antigo usava `br.local.superlite`; é um app separado. O código anterior continua no histórico Git, a partir do commit `d3dd2f3`.
 
-O bloqueador não é o motor do Brave nem uma implementação de EasyList. As regras são embarcadas, sem atualização automática, proxy ou envio de navegação. O WebView não intercepta todos os tipos de requisição; anúncios de vídeo do YouTube podem continuar aparecendo, inclusive inserções servidas com o conteúdo. O filtro visual depende de JavaScript. A proteção agressiva pode afetar alguns sites; use a exceção por site.
+## Privacidade e limites
 
-Faixas pretas necessárias para preservar a proporção original do vídeo são normais. A alteração elimina o espaço do navegador ao redor do player, sem esticar nem cortar a imagem.
+- O modo anônimo evita histórico/abas persistidos e separa os dados WebView, mas não oculta seu IP, atividade de sites, provedor ou rede. Arquivos baixados e compartilhamentos explícitos continuam fora da sessão. Não é apagamento forense. No encerramento normal, o perfil privado é removido; se o processo for morto, seu perfil anterior é removido antes de abrir a próxima sessão privada.
+- Android 5 a 8 continuam com navegação normal; a sessão anônima isolada não fica disponível nesses sistemas.
+- A atualização antiga que apenas alternava um indicador anônimo foi substituída pela sessão separada. A versão nova abre normalmente mesmo se esse indicador legado estava salvo.
+- Consultas de atualização usam GitHub e seus servidores/CDNs, com os dados técnicos normais da conexão, como IP e User-Agent. Não enviam histórico, URLs visitadas, favoritos ou cookies de navegação. Consultas automáticas são desativáveis e não acontecem na sessão anônima.
+- O bloqueador combina domínios, padrões de URL e filtros visuais. O filtro visual depende de JavaScript. Anúncios do YouTube podem continuar aparecendo, especialmente os servidos com o conteúdo. Use a exceção por site caso uma página apresente problemas.
+- Tela cheia usa uma camada preta sobre a janela e restaura o navegador ao sair. Faixas pretas decorrentes da proporção original do vídeo são normais; o app não estica nem corta a imagem.
+- Downloads `blob:`/`data:` e retomada manual de downloads não são suportados. O Android controla a fila e tentativas de rede.
+- O APK continua assinado com chave de debug para distribuição de desenvolvimento pelo GitHub. A chave não é versionada; um build em outra máquina pode ter assinatura diferente.
 
-## Instalar no celular
-1. [Baixe Raio.apk](https://github.com/ezeq-ol/raio/releases/latest/download/Raio.apk) pelo celular.
-2. Abra o arquivo e permita "instalar apps desconhecidos" quando o Android pedir.
-3. Toque no ícone do raio chamado **Raio**.
+## Compilar no Windows
 
-## O que tem
-- Página inicial local (abre instantaneamente, sem rede) com busca e atalhos
-- Barra de endereço inteligente (URL ou pesquisa), barra inferior com voltar, avançar, início, abas e menu
-- Até 8 abas, favoritos, histórico, localizar na página, compartilhar, downloads, vídeo em tela cheia
-- Pressionar e segurar em link/imagem: abrir em nova aba, copiar, baixar
-- Configurações: mecanismo de busca (Google, DuckDuckGo, Bing, Brave, Ecosia), página inicial, restaurar abas,
-  bloqueio de anúncios e rastreadores, economia de dados (sem imagens), JavaScript, versão desktop,
-  tamanho do texto, tema claro/escuro/automático, escurecer sites, modo anônimo, "Não rastrear",
-  cookies de terceiros, bloquear pop-ups, limpar dados ao sair, limpar histórico/cache/cookies,
-  definir como navegador padrão
+Configure `JAVA_HOME` com um JDK 17 ou 21 e `ANDROID_HOME` com o Android SDK (padrão: `%LOCALAPPDATA%\Android\Sdk`). Instale a plataforma Android 35 e aceite as licenças do SDK.
 
-## Por que é leve
-- Zero bibliotecas externas (sem AndroidX); interface desenhada em código, sem imagens
-- Uma única WebView reaproveitada entre as abas
-- Bloqueio de anúncios por lista de domínios (rápido)
-- Código reduzido com R8 no build de release
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
 
-## Gerar o APK de novo
-Configure `JAVA_HOME` com um JDK 17 ou 21 e `ANDROID_HOME` com o Android SDK (por padrão, `%LOCALAPPDATA%\Android\Sdk`). Instale a plataforma Android 35 e aceite as licenças do SDK.
+Ou abra `gerar-apk.bat`. O script baixa Gradle 8.9 na primeira execução. Resultado: `dist/Raio.apk`. Também é possível abrir a pasta no Android Studio.
 
-Execute `powershell -ExecutionPolicy Bypass -File .\build.ps1` ou dê duplo clique em `gerar-apk.bat`. O script baixa Gradle 8.9 na primeira execução e gera `dist/Raio.apk`. Também é possível abrir esta pasta no Android Studio.
+## Validação
 
-O release usa a chave de debug local para permitir instalação de desenvolvimento. Essa chave não é versionada; builds em máquinas diferentes podem ter assinaturas diferentes.
+Com Gradle 8.9 e o SDK configurados:
 
-## Migração e limites conhecidos
+```text
+gradle assembleRelease lintRelease testDebugUnitTest
+node tools/test-shield.cjs
+```
 
-- O identificador agora é `com.raio.browser`; o SuperLite anterior usava `br.local.superlite`. Os apps são instalados separadamente, sem migração automática de dados.
-- O modo anônimo suprime o salvamento de histórico e abas enquanto ativo, mas compartilha cookies e armazenamento com a navegação normal. A limpeza ao sair depende do encerramento normal da Activity; não garante limpeza se o processo for morto.
-- As abas reaproveitam uma WebView: alternar recarrega a URL, sem histórico, formulários ou posição de rolagem independentes por aba.
-- Câmera, microfone e geolocalização de sites são negados. Downloads `blob:` e `data:` não são suportados.
-- Não foi realizado teste em aparelho nesta migração; nenhum dispositivo ADB estava conectado.
+JUnit e Robolectric são dependências apenas de testes, sem inclusão no APK. Os testes cobrem regras de rede, validação das listas e URLs de release, versões, origem/permissões, preferências privadas, abas, fechamento de páginas, tela cheia, downloads e atalhos. Há testes de abertura das telas simulando Android 5 e 15 e testes de ciclo de vida no Android 9.
 
-## Arquivos principais
-`app/src/main/java/com/raio/browser/`
-- `MainActivity.kt` navegador, abas, menu
-- `SettingsActivity.kt` configurações
-- `LibraryActivity.kt` favoritos e histórico
-- `Core.kt` preferências e tema
-- `AdBlock.kt` regras locais de rede
-- `ShieldScript.kt` filtros visuais e controle de pular anúncio
-- `StartPage.kt` página inicial e de erro
-- `Ic.kt` ícones desenhados em código
+A execução desses testes não substitui testes em aparelho para reprodução do YouTube, consumo total de RAM, bateria e isolamento entre processos reais. Não havia dispositivo ADB conectado na preparação desta versão. `tools/measure-device.ps1` registra tempo de abertura e relatório de memória quando um aparelho estiver conectado e autorizado.
 
-## Validar alterações
+## Código principal
 
-Com Gradle 8.9 e o SDK configurados, execute `gradle assembleRelease lintRelease testDebugUnitTest`. Para testar o filtro visual sem Android, execute `node tools/test-shield.cjs` (Node.js).
-
-Os testes cobrem regras de rede, preservação de URLs de reprodução/login, limites de domínio, filtros visuais e controles de pular anúncio. A confirmação visual da tela cheia ainda exige teste em aparelho; não havia dispositivo ADB conectado na preparação da versão 1.1.
+- `MainActivity.kt`: navegação, abas, tela cheia e interface.
+- `RaioApp.kt`: início do aplicativo e processo anônimo separado.
+- `AdBlock.kt`, `ShieldScript.kt`: filtros de rede e de página.
+- `Updates.kt`, `SitePolicy.kt`: consultas ao GitHub e validação de respostas.
+- `SitePermissions.kt`: consentimento por origem e permissões do Android.
+- `UtilityScreens.kt`: downloads e atalhos.
+- `Core.kt`: preferências e tema.
+- `SettingsActivity.kt`, `LibraryActivity.kt`, `StartPage.kt`: configurações, biblioteca e página inicial.

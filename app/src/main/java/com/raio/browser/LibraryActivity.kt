@@ -14,7 +14,7 @@ import android.widget.ListView
 import android.widget.TextView
 
 /** Lista de favoritos ou historico (mesma tela, sem bibliotecas). */
-class LibraryActivity : Activity() {
+open class LibraryActivity : Activity() {
     private lateinit var pal: Pal
     private lateinit var mode: String
     private lateinit var items: MutableList<Entry>
